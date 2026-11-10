@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f2233">
+<title>Andijon uylari</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+html,body{margin:0;height:100%;background:#0f2233;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+#map{position:absolute;inset:0}
+.maplibregl-canvas{filter:invert(1) hue-rotate(190deg) brightness(.85) contrast(1.05)}
+.brand,.count{position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);background:#0f2233;color:#fff;border-radius:12px;padding:8px 12px;font-weight:700;font-size:14px;z-index:5}
+.brand{left:10px}
+.count{right:10px;text-align:right}
+.count small{display:block;font-size:10px;font-weight:600;color:#9fb0c9}
+.count b{font-size:20px}
+.card{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 22px);max-width:420px;background:#0f2233;color:#fff;border-radius:16px;padding:12px;z-index:5}
+.card p{margin:0 0 8px;font-size:14px;font-weight:700}
+.row{display:flex;gap:8px}
+.row input{flex:1;min-width:0;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid #2b405e;background:#18283f;color:#fff}
+.row button{font-size:15px;font-weight:800;padding:0 14px;border:0;border-radius:10px;background:#ffc21a;color:#1a1a1a}
+#msg{min-height:18px;margin-top:8px;font-size:13px;color:#9fb0c9}
+.pill{background:#fff;color:#1d2b1a;border-radius:10px;padding:2px 7px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.pill.shop{background:#ffc21a}
+.pill.me{background:#2ec4a6;color:#04342c;transform:scale(1.25)}
+.maplibregl-ctrl-bottom-right{bottom:150px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="brand">Andijon uylari</div>
+<div class="count"><small>AHOLI</small><b id="cnt">0</b></div>
+<div class="card">
+<p>Andijondan o’z uyingizni oling</p>
+<div class="row"><input id="nik" type="text" placeholder="@ Nikingizni yozing" autocomplete="off" autocapitalize="off" aria-label="Nikingiz"><button id="go" type="button">Mening uyim</button></div>
+<div id="msg"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+var SUPABASE_URL="YOUR_SUPABASE_URL";
+var SUPABASE_KEY="YOUR_SUPABASE_KEY";
+var CENTER=[72.3442,40.7821];
+
+var users={},markers=[];
+var H={apikey:SUPABASE_KEY,"Content-Type":"application/json"};
+if(SUPABASE_KEY.indexOf("eyJ")===0)H.Authorization="Bearer "+SUPABASE_KEY;
+var $=function(id){return document.getElementById(id)};
+function msg(t){$("msg").textContent=t}
+function clean(v){return v.trim().toLowerCase().replace(/^@/,"").replace(/\s+/g,"")}
+function key(lng,lat){return lng.toFixed(5)+","+lat.toFixed(5)}
+
+if(typeof maplibregl==="undefined"){msg("Xarita yuklanmadi. Sayt internetga joylangach ishlaydi.");throw new Error("maplibre yuklanmadi")}
+var map=new maplibregl.Map({container:"map",style:"https://tiles.openfreemap.org/styles/liberty",center:CENTER,zoom:15.6,pitch:60,bearing:-20,maxPitch:75});
+map.addControl(new maplibregl.NavigationControl({visualizePitch:true}),"bottom-right");
+
+map.on("load",function(){
+try{
+if(!map.getLayer("building-3d")){
+map.addLayer({id:"b3d",type:"fill-extrusion",source:"openmaptiles","source-layer":"building",minzoom:14,paint:{"fill-extrusion-color":"#9aa4b5","fill-extrusion-height":["coalesce",["get","render_height"],8],"fill-extrusion-base":["coalesce",["get","render_min_height"],0],"fill-extrusion-opacity":0.9}});
+}
+}catch(e){}
+load();
+setInterval(load,60000);
+});
+
+function ready(){return new Promise(function(res){if(map.loaded()&&!map.isMoving())res();else map.once("idle",res)})}
+
+function load(){
+if(SUPABASE_URL.indexOf("YOUR_")===0){msg("Sayt hali sozlanmagan: Supabase manzili kiritilmagan.");return Promise.resolve()}
+return fetch(SUPABASE_URL+"/rest/v1/uylar?select=nik,lng,lat,tur&order=id.asc&limit=1500",{headers:H})
+.then(function(r){return r.json()})
+.then(function(rows){
+if(!Array.isArray(rows))return;
+markers.forEach(function(m){m.remove()});
+markers=[];users={};
+rows.forEach(add);
+$("cnt").textContent=rows.length;
+}).catch(function(){msg("Ulanishda xato. Keyinroq urinib ko’ring.")});
+}
+
+function add(r){
+var el=document.createElement("div");
+el.className="pill"+(r.tur==="dokon"?" shop":"");
+el.textContent=r.nik;
+var m=new maplibregl.Marker({element:el,anchor:"bottom"}).setLngLat([r.lng,r.lat]).addTo(map);
+markers.push(m);
+users[r.nik]={lng:r.lng,lat:r.lat,el:el};
+}
+
+function fly(u){
+Object.keys(users).forEach(function(k){users[k].el.classList.remove("me")});
+u.el.classList.add("me");
+map.flyTo({center:[u.lng,u.lat],zoom:18.2,pitch:65,speed:0.8});
+}
+
+function pick(){
+var f=map.querySourceFeatures("openmaptiles",{sourceLayer:"building"});
+var used=Object.keys(users).map(function(k){return users[k]});
+var list=[];
+f.forEach(function(x){
+var g=x.geometry,ring=null;
+if(g.type==="Polygon")ring=g.coordinates[0];
+else if(g.type==="MultiPolygon")ring=g.coordinates[0][0];
+if(!ring)return;
+var a=1e9,b=1e9,c=-1e9,d=-1e9;
+ring.forEach(function(p){a=Math.min(a,p[0]);c=Math.max(c,p[0]);b=Math.min(b,p[1]);d=Math.max(d,p[1])});
+var m2=(c-a)*(d-b)*9.3e9;
+if(m2<30||m2>500)return;
+list.push({lng:(a+c)/2,lat:(b+d)/2});
+});
+list.sort(function(p,q){
+var dp=Math.pow(p.lng-CENTER[0],2)+Math.pow(p.lat-CENTER[1],2);
+var dq=Math.pow(q.lng-CENTER[0],2)+Math.pow(q.lat-CENTER[1],2);
+return dp-dq;
+});
+for(var i=0;i<list.length;i++){
+var ok=true;
+for(var j=0;j<used.length;j++){
+var dx=(list[i].lng-used[j].lng)*84000,dy=(list[i].lat-used[j].lat)*111000;
+if(dx*dx+dy*dy<144){ok=false;break}
+}
+if(ok)return list[i];
+}
+return null;
+}
+
+async function go(){
+var nik=clean($("nik").value);
+if(!/^[a-z0-9._]{2,30}$/.test(nik)){msg("Nikni to’g’ri yozing: harf, raqam, nuqta yoki pastki chiziq.");return}
+if(users[nik]){fly(users[nik]);msg("Uyingiz topildi.");return}
+if(SUPABASE_URL.indexOf("YOUR_")===0){msg("Sayt hali sozlanmagan.");return}
+$("go").disabled=true;
+msg("Uyingizni qidiryapman…");
+try{
+await ready();
+var tries=0;
+while(tries<5){
+var c=pick();
+if(!c){msg("Bu joyda bo’sh bino topilmadi.");break}
+var r=await fetch(SUPABASE_URL+"/rest/v1/uylar",{method:"POST",headers:Object.assign({Prefer:"return=representation"},H),body:JSON.stringify({nik:nik,lng:c.lng,lat:c.lat,kalit:key(c.lng,c.lat),tur:"uy"})});
+if(r.ok){
+var rows=await r.json();
+add(rows[0]);
+$("cnt").textContent=Object.keys(users).length;
+fly(users[nik]);
+msg("Mana sizning uyingiz!");
+break;
+}
+await load();
+if(users[nik]){fly(users[nik]);msg("Uyingiz topildi.");break}
+tries++;
+}
+if(tries>=5)msg("Hozir band, bir ozdan keyin qayta urinib ko’ring.");
+}catch(e){msg("Xatolik yuz berdi. Qayta urinib ko’ring.")}
+$("go").disabled=false;
+}
+$("go").addEventListener("click",go);
+$("nik").addEventListener("keydown",function(e){if(e.key==="Enter")go()});
+</script>
+</body>
+</html>
